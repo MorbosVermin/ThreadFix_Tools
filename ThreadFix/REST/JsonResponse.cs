@@ -65,44 +65,52 @@ namespace Com.WaitWha.ThreadFix.REST
         public static JsonResponse GetInstance(string json, Type objectType)
         {
             Log.Debug(String.Format("Parsing JSON (string) to JsonResponse: {0}", json));
-            JavaScriptSerializer serializer = new JavaScriptSerializer();
-            Dictionary<string, dynamic> jsonResponse = 
-                serializer.Deserialize<Dictionary<string, dynamic>>(json);
-            JsonResponse response = new JsonResponse()
+            try
             {
-                Message = jsonResponse["message"],
-                Success = jsonResponse["success"],
-                Code = jsonResponse["responseCode"]
-            };
-
-            if (response.Success && objectType != null)
-            {
-                /*
-                 * 1. Get the returned object as a string (JSON). JavaScriptSerializer is not good at dynamic types.
-                 * 2. Use DataContractJsonSerializer to serialize the JSON (string).
-                 * 3. Profit?
-                 */
-                string serializedObject = serializer.Serialize(jsonResponse["object"]);
-                if (!serializedObject.Equals("null", StringComparison.CurrentCultureIgnoreCase))
+                JavaScriptSerializer serializer = new JavaScriptSerializer();
+                Dictionary<string, dynamic> jsonResponse =
+                    serializer.Deserialize<Dictionary<string, dynamic>>(json);
+                JsonResponse response = new JsonResponse()
                 {
-                    Log.Debug(String.Format("Serializing response object to type {0}: {1}", objectType.Name, serializedObject));
-                    DataContractJsonSerializer jsonSerializer = new DataContractJsonSerializer(objectType);
-                    using (MemoryStream stream = new MemoryStream())
-                    {
-                        stream.Write(Encoding.UTF8.GetBytes(serializedObject), 0, Encoding.UTF8.GetByteCount(serializedObject));
-                        stream.Flush();
-                        stream.Position = 0;
+                    Message = jsonResponse["message"],
+                    Success = jsonResponse["success"],
+                    Code = jsonResponse["responseCode"]
+                };
 
-                        response.Object = jsonSerializer.ReadObject(stream);
+                if (response.Success && objectType != null)
+                {
+                    /*
+                     * 1. Get the returned object as a string (JSON). JavaScriptSerializer is not good at dynamic types.
+                     * 2. Use DataContractJsonSerializer to serialize the JSON (string).
+                     * 3. Profit?
+                     */
+                    string serializedObject = serializer.Serialize(jsonResponse["object"]);
+                    if (!serializedObject.Equals("null", StringComparison.CurrentCultureIgnoreCase))
+                    {
+                        Log.Debug(String.Format("Serializing response object to type {0}: {1}", objectType.Name, serializedObject));
+                        DataContractJsonSerializer jsonSerializer = new DataContractJsonSerializer(objectType);
+                        using (MemoryStream stream = new MemoryStream())
+                        {
+                            stream.Write(Encoding.UTF8.GetBytes(serializedObject), 0, Encoding.UTF8.GetByteCount(serializedObject));
+                            stream.Flush();
+                            stream.Position = 0;
+
+                            response.Object = jsonSerializer.ReadObject(stream);
+                        }
                     }
                 }
+
+                Log.Debug(String.Format("JsonResponse.Success = {0}", response.Success));
+                if (!response.Success)
+                    Log.Error(String.Format("JsonResponse Error {1}: {0}", response.Message, response.Code));
+
+                return response;
+
+            }catch(Exception e)
+            {
+                Log.Error(String.Format("Unable to deserialize JSON response: {0} {1}", e.GetType().Name, e.Message), e);
+                throw e;
             }
-            
-            Log.Debug(String.Format("JsonResponse.Success = {0}", response.Success));
-            if (!response.Success)
-                Log.Error(String.Format("JsonResponse Error {1}: {0}", response.Message, response.Code));
-            
-            return response;
         }
         
         /// <summary>

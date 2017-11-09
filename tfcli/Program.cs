@@ -22,17 +22,31 @@ namespace Com.WaitWha.ThreadFix
         static void Help(string errorMessage = "")
         {
             if (errorMessage.Length > 0)
+            {
                 Console.Error.WriteLine(errorMessage);
+                Console.Error.WriteLine();
+            }
 
             string filename = Path.GetFileName(Process.GetCurrentProcess().MainModule.FileName);
-            Console.WriteLine("Syntax: {0} [/info | /add | /upload <filename>] [/team <id|name> | /app <id|name>] [/url <appUrl>] [/tfurl <threadfix URL>] [/debug|/v] <apikey>", filename);
+            Console.WriteLine("Syntax: {0} [/server <threadfix URL>] [/debug|/v] [<apikey>] [action] [action options...]", filename);
+            Console.WriteLine("<apikey>     Is required for at least the first run. Will be saved to a configuration file afterward.");
+            Console.WriteLine("/server      Is required for at least the first run. Will be saved to a configuration file afterward.");
+            Console.WriteLine();
+
+            Console.WriteLine("Available Actions: ");
+            foreach(string name in Enum.GetNames(typeof(Actions)))
+            {
+                Console.WriteLine("{0}", name + (name.Equals("info") ? " (default)" : ""));
+            }
+            Console.WriteLine();
+
             Console.WriteLine("Examples:");
-            Console.WriteLine(@"C:\> {0} fdsa9f89wjkro3kfs0akfdslafk03i03kfowi              #lists teams and saves APIKEY given", filename);
-            Console.WriteLine("C:\\> {0} /team \"\"                                         #list teams", filename);
-            Console.WriteLine("C:\\> {0} /app \"\"                                          #list apps", filename);
-            Console.WriteLine("C:\\> {0} /add /team \"new team name\"                       #create team", filename);
-            Console.WriteLine("C:\\> {0} /add /team 3 /app \"app name\" /url \"http://localhost\"   #create application", filename);
-            Console.WriteLine(@"C:\> {0} /upload file.xml /app 3                            #uploads a scan file for an application", filename);
+            Console.WriteLine("{0} /teams                                                              #list teams", filename);
+            Console.WriteLine("{0} /apps                                                               #list apps", filename);
+            Console.WriteLine("{0} /add /teamName \"new team name\"                                    #create team", filename);
+            Console.WriteLine("{0} /add /teamId 3 /appName \"app name\" /appUrl \"http://localhost\"   #create application", filename);
+            Console.WriteLine("{0} /upload file.xml /appId 3                                           #uploads a scan file for an application", filename);
+
             Environment.Exit(-1);
         }
 
@@ -40,7 +54,7 @@ namespace Com.WaitWha.ThreadFix
         {
             Hierarchy hierarchy = (Hierarchy)LogManager.GetRepository();
 
-            if (logPath.Length > 0)
+            if (logPath == null || logPath.Length > 0)
             {
                 PatternLayout patternLayout = new PatternLayout();
                 patternLayout.ConversionPattern = "%date [%thread] %-5level %logger - %message%newline";
@@ -69,137 +83,137 @@ namespace Com.WaitWha.ThreadFix
             hierarchy.Configured = true;
         }
 
-        static void Main(string[] args)
+        enum Actions
         {
-            bool debug = false;
-            string logFile = "";
-            Uri baseUri = null;
-            string action = "info";
-            bool team = true;
-            int teamId = 0;
-            string teamName = "";
-            int appId = 0;
-            string appName = "";
-            string appUrl = "";
-            string apikey = "";
-            string pathToFile = "";
+            info,
+            add,
+            upload
+        }
 
-            if (args.Length == 0)
-                Help();
+        class Configuration : Dictionary<string, dynamic>
+        {
+            
+            public bool IsDebugMode
+            {
+                get { return this.Keys.Contains("debug") || this.Keys.Contains("v"); }
+            }
 
-            try
+            public string LogFile
+            {
+                get { return (this.Keys.Contains("log")) ? this["log"] : null; }
+            }
+
+            public Uri BaseUri
+            {
+                get { return (this.Keys.Contains("server")) ? new Uri(this["server"]) : null; }
+            }
+
+            public Actions Action
+            {
+                get
+                {
+                    if (this.Keys.Contains("add"))
+                        return Actions.add;
+                    else if (this.Keys.Contains("upload"))
+                        return Actions.upload;
+
+                    return Actions.info;
+                }
+            }
+
+            public string ApiKey { get; private set; }
+
+            public Configuration(string[] args)
             {
                 for (int i = 0; i < args.Length; i++)
                 {
-                    if (args[i].Equals("/debug") || args[i].Equals("/v"))
-                        debug = !debug;
+                    if (args[i].StartsWith("/") || args[i].StartsWith("-"))
+                    {
+                        string key = args[i].Substring(1); //everything but the / or -
+                        dynamic value;
 
-                    else if (args[i].Equals("/log"))
-                    {
-                        logFile = args[(i + 1)];
-                        i++;
-                    }
-                    else if (args[i].Equals("/tfurl"))
-                    {
-                        baseUri = new Uri(args[(i + 1)]);
-                        i++;
-                    }
-                    else if (args[i].Equals("/info"))
-                    {
-                        action = "info";
-                    }
-                    else if (args[i].Equals("/add"))
-                    {
-                        action = "add";
-                    }
-                    else if(args[i].Equals("/upload"))
-                    {
-                        action = "upload";
-                        pathToFile = args[(i + 1)];
-                        i++;
-                    }
-                    else if (args[i].Equals("/team"))
-                    {
-                        team = true;
-                        try
+                        //check next argument, if one exists, to see if it is another option given. This indicates a boolean value.
+                        if ((i + 1) < args.Length && !args[(i + 1)].StartsWith("/") && !args[(i + 1)].StartsWith("-"))
                         {
-                            teamId = Int32.Parse(args[(i + 1)]);
+                            value = args[(i + 1)];
+                            i++;
                         }
-                        catch (Exception)
-                        {
-                            teamName = args[(i + 1)];
-                        }
-
-                        i++;
-                    }
-                    else if (args[i].Equals("/app"))
-                    {
-                        team = false;
-                        try
-                        {
-                            appId = Int32.Parse(args[(i + 1)]);
-                        }
-                        catch (Exception)
-                        {
-                            appName = args[(i + 1)];
-                        }
-
-                        i++;
-                    }
-                    else if (args[i].Equals("/url"))
-                    {
-                        appUrl = args[(i + 1)];
-                        i++;
+                        else
+                            value = true;
+                        
+                        this.Add(key, value);
                     }
                     else
-                        apikey = args[i];
+                    {
+                        ApiKey = args[i];
+                    }
+                }
+
+                SetupLogging((IsDebugMode) ? Level.Debug : Level.Info, LogFile);
+
+                if (ApiKey == null || ApiKey.Length == 0)
+                {
+                    //try to get API key from Properties.
+                    if (Properties.Settings.Default.apikey.Length > 0)
+                    {
+                        ApiKey = Properties.Settings.Default.apikey;
+                        Log.Debug(String.Format("Loaded API KEY from saved settings: {0}", ApiKey));
+                    }
+                    else
+                        Help("Error: No APIKEY given or in saved settings.");
+
+                }
+
+                if(BaseUri == null)
+                {
+                    //try to get last URI used from properties.
+                    if (Properties.Settings.Default.threadfix_url.Length > 0)
+                    {
+                        this.Add("server", Properties.Settings.Default.threadfix_url);
+                        Log.Debug(String.Format("Loaded ThreadFix URL from saved settings: {0}", BaseUri));
+                    }
+                    else
+                        Help("Error: No server given or saved in settings.");
 
                 }
             }
-            catch(IndexOutOfRangeException)
+
+            public dynamic GetValueWithCheck(string key)
             {
-                Help("Error: Missing argument. Please check your input and try again.");
+                if (this.Keys.Contains(key))
+                    return this[key];
+
+                Help("Error: The option '/" + key + "' is required.");
+                return null; //unreachable, I know, I know... :/
             }
 
-            SetupLogging((debug) ? Level.Debug : Level.Info, logFile);
-
-            if(apikey.Length == 0)
+            public void Save()
             {
-                apikey = Properties.Settings.Default.apikey;
-                if (apikey.Length == 0)
-                    Help("Error: No APIKEY given or in saved settings.");
-                else
-                    Log.Debug(String.Format("Successfully retrieved APIKEY from settings: {0}", apikey));
-
+                Log.Debug("Saving settings...");
+                Properties.Settings.Default.threadfix_url = BaseUri.ToString();
+                Properties.Settings.Default.apikey = ApiKey;
+                Properties.Settings.Default.Save();
             }
+        }
+        
+        static void Main(string[] args)
+        {
+            if (args.Length == 0)
+                Help();
 
-            if(baseUri == null && Properties.Settings.Default.threadfix_url.Length > 0)
-            {
-                baseUri = new Uri(Properties.Settings.Default.threadfix_url);
-                Log.Debug(String.Format("Successfully retrieved ThreadFix URL from settings: {0}", baseUri));
-            }
+            Configuration config = new Configuration(args);
+            if (config.Keys.Contains("help") || config.Keys.Contains("h") || config.Keys.Contains("?"))
+                Help();
+            
+            config.Save();
 
-            Log.Debug("Saving configuration.");
-            Properties.Settings.Default.apikey = apikey;
-            if(baseUri != null)
-                Properties.Settings.Default.threadfix_url = baseUri.ToString();
-
-            Properties.Settings.Default.Save();
-
-            ThreadFixService service = (baseUri == null) ? new ThreadFixService(apikey) : new ThreadFixService(baseUri, apikey);
-
-            /**
-             * TODO
-             *  1. Support the user giving just one application or team ID and then just giving information about this ID.
-             *  2. Support the addition of manual findings to an application.
-             *  
-             */
-            if(action.Equals("info"))
+            ThreadFixService service = new ThreadFixService(config.BaseUri, config.ApiKey);
+            if(config.Action == Actions.info)
             {
                 List<Team> teams = service.GetAllTeams().GetAwaiter().GetResult();
                 foreach(Team t in teams)
                 {
-                    if(team)
+                    if(config.Keys.Contains("teams"))
                     {
                         Log.Info(String.Format("[{0}] {1}", t.Id, t.Name));
                         Log.Debug(String.Format("Total Vulns: {0}, Critical: {1}, High: {2}, Medium: {3}, Low: {4}, Info: {5}",
@@ -226,35 +240,62 @@ namespace Com.WaitWha.ThreadFix
                 }
 
             }
-            else if(action.Equals("add"))
+            else if(config.Action == Actions.add)
             {
-                if(team)
+                if(config.Keys.Contains("teamName"))
                 {
-                    if (teamName.Length == 0)
-                        Help("Error: Team name is required.");
+                    string teamName = config.GetValueWithCheck("teamName");
 
                     Log.Debug(String.Format("Adding team: {0}", teamName));
-                    teamId = service.CreateTeam(teamName).GetAwaiter().GetResult();
+                    int teamId = service.CreateTeam(teamName).GetAwaiter().GetResult();
                     Log.Info(String.Format("Successfully added team '{0}': {1}", teamName, teamId));
-                }
-                else
-                {
-                    if (appName.Length == 0 || appUrl.Length == 0)
-                        Help("Error: Application name and URL are required.");
-                    else if (teamId == 0)
-                        Help("Error: Team ID is required.");
 
+                }
+                else if(config.Keys.Contains("teamId"))
+                {
+                    string appName = config.GetValueWithCheck("appName");
+                    string appUrl = config.GetValueWithCheck("appUrl");
+                    int teamId = Int32.Parse(config.GetValueWithCheck("teamId"));
+                    
                     Log.Debug(String.Format("Adding application '{0}' to team {1}", appName, teamId));
-                    appId = service.AddApplication(teamId, appName, appUrl).GetAwaiter().GetResult();
+                    int appId = service.AddApplication(teamId, appName, appUrl).GetAwaiter().GetResult();
                     Log.Info(String.Format("Successfully added application '{0}' to team {1}: {2}", appName, teamId, appId));
                 }
+                else if(config.Keys.Contains("appId"))
+                {
+                    int appId = Int32.Parse(config.GetValueWithCheck("appId"));
+                    string vulnType = config.GetValueWithCheck("vuln");
+                    string description = config.GetValueWithCheck("desc");
+                    int severity = Int32.Parse(config.GetValueWithCheck("sev"));
+                    bool isStatic = (config.Keys.Contains("static")) ? true : false;
+                    int nativeId = Int32.Parse(config.GetValueWithCheck("nativeId"));
+                    string parameter = (config.Keys.Contains("parameter")) ? config.GetValueWithCheck("parameter") : "";
+                    int column = (config.Keys.Contains("column")) ? Int32.Parse(config.GetValueWithCheck("column")) : -1;
+                    string filePath = (config.Keys.Contains("filePath")) ? config.GetValueWithCheck("filePath") : "";
+                    string lineText = (config.Keys.Contains("lineText")) ? config.GetValueWithCheck("lineText") : "";
+                    int lineNumber = (config.Keys.Contains("lineNumber")) ? Int32.Parse(config.GetValueWithCheck("lineNumber")) : 0;
+                    string fullUrl = (config.Keys.Contains("fullUrl")) ? config.GetValueWithCheck("fullUrl") : "";
+                    string path = (config.Keys.Contains("path")) ? config.GetValueWithCheck("path") : "";
+
+                    Log.Debug(String.Format("Adding manual scan finding for application: {0}", appId));
+                    if(service.AddManualFinding(appId, vulnType, description, severity, isStatic, nativeId, parameter, filePath, column, lineText, lineNumber, fullUrl, path).GetAwaiter().GetResult())
+                    {
+                        Log.Info(String.Format("Successfully added manual finding for application {0}", appId));
+                    }
+                    else
+                    {
+                        Log.Error(String.Format("Failed to add manual scan finding for application {0}", appId));
+                    }
+                }
+
 
             }
-            else if(action.Equals("upload"))
+            else if(config.Action == Actions.upload)
             {
-                if (appId == 0)
-                    Help("Error: Application ID is required.");
+                int appId = Int32.Parse(config.GetValueWithCheck("appId"));
+                string pathToFile = config.GetValueWithCheck("upload");
 
+                Log.Info(String.Format("Uploading {0} for application {1}...", pathToFile, appId));
                 if(service.AddApplicationScan(appId, pathToFile).GetAwaiter().GetResult())
                 {
                     Log.Info(String.Format("Successfully uploaded scan for application {0}: {1}", appId, pathToFile));

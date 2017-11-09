@@ -21,7 +21,6 @@ namespace Com.WaitWha.ThreadFix.REST
         static ILog Log = LogManager.GetLogger(typeof(ThreadFixService));
         public static readonly string REST = "rest";
         public const string DefaultUserAgent = "TFLIB.Net v1.0";
-        public static readonly long DEFAULT_MAX_RESPONSE_CONTENT_BUFFER_SIZE = 65535 * 4;
 
         public Uri BaseUri { get; private set; }
         public string ApiKey { get; private set; }
@@ -41,10 +40,14 @@ namespace Com.WaitWha.ThreadFix.REST
             ApiKey = apiKey;
             UserAgent = userAgent;
 
-            Client = new HttpClient() { MaxResponseContentBufferSize = DEFAULT_MAX_RESPONSE_CONTENT_BUFFER_SIZE };
+            //Maximum Request and Response buffer sizes are 2gb. 
+            HttpClientHandler handler = new HttpClientHandler();
+            Client = new HttpClient(handler);
+
             Client.DefaultRequestHeaders.Accept.Clear();
             Client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             Client.DefaultRequestHeaders.Add("User-Agent", UserAgent);
+            Client.DefaultRequestHeaders.ExpectContinue = false;
         }
 
         /// <summary>
@@ -77,6 +80,7 @@ namespace Com.WaitWha.ThreadFix.REST
             Uri endpoint = new Uri(BaseUri, path);
             Log.Debug(String.Format("Sending GET request to {0}", endpoint));
             string json = await Client.GetStringAsync(endpoint);
+
             return JsonResponse.GetInstance(json, objectType);
         }
 
@@ -105,6 +109,7 @@ namespace Com.WaitWha.ThreadFix.REST
                 content);
             Log.Debug(String.Format("Received HTTP response from {1}: {0}", response.StatusCode, uri));
 
+            response.EnsureSuccessStatusCode();
             string json = await response.Content.ReadAsStringAsync();
             return JsonResponse.GetInstance(json, objectType);
         }
@@ -113,25 +118,30 @@ namespace Com.WaitWha.ThreadFix.REST
         /// Uploads a file
         /// </summary>
         /// <param name="path">Path on the REST API to send the POST</param>
-        /// <param name="pathToFile">Local path to the file to upload</param>
+        /// <param name="pathToXmlFile">Local path to the file to upload</param>
         /// <returns>JsonResponse</returns>
-        async Task<JsonResponse> Upload(string path, string pathToFile)
+        async Task<JsonResponse> Upload(string path, string pathToXmlFile)
         {
-            path = "threadfix/" + REST + "/" + path;
-            path += String.Format("?apiKey={0}", ApiKey);
+            path = "threadfix/" + REST + "/" + path + "?apiKey=" + ApiKey;
 
-            Log.Debug(String.Format("Caching file: {0}", pathToFile));
-            MultipartContent content = new MultipartContent();
-            using (FileStream stream = new FileStream(pathToFile, FileMode.Open))
-            {
-                content.Add(new StreamContent(stream));
-            }
+            MultipartFormDataContent content = 
+                new MultipartFormDataContent("--------------" + Guid.NewGuid().ToString());
+            StreamContent streamContent = new StreamContent(File.OpenRead(pathToXmlFile));
+            streamContent.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data");
+            streamContent.Headers.ContentDisposition.Name = "file";
+            streamContent.Headers.ContentDisposition.FileName = Path.GetFileName(pathToXmlFile);
+            streamContent.Headers.ContentType = new MediaTypeWithQualityHeaderValue("text/xml");
+            content.Add(
+                streamContent, 
+                Guid.NewGuid().ToString(), 
+                Path.GetFileName(pathToXmlFile));
 
             Uri uri = new Uri(BaseUri, path);
-            Log.Debug(String.Format("Uploading file to ThreadFix service: {0}", uri));
+            Log.Debug(String.Format("Uploading {1} to ThreadFix service: {0}...", uri, pathToXmlFile));
             HttpResponseMessage response = await Client.PostAsync(uri, content);
             Log.Debug(String.Format("Received HTTP Response: {0}", response.StatusCode));
 
+            response.EnsureSuccessStatusCode();
             return JsonResponse.GetInstance(response, null);
         }
 
